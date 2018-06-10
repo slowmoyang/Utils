@@ -49,13 +49,6 @@ def submit_job(executable, batch_name, arguments, dependencies):
     else:
         os.mkdir(submit_dir)
 
-
-    ########################################
-    #
-    #########################################
-    # for d in dependencies:
-    #     os.chmod(d, 0o777)
-         
     ###################################
     # Write a jds file.
     ###################################
