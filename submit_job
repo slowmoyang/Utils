@@ -1,0 +1,109 @@
+#!/usr/bin/env python
+import os
+import stat
+import sys
+import argparse
+from datetime import datetime
+import collections
+
+_SUBMIT_TEMPLATE = """ #
+executable = {executable}
+universe = vanilla
+log = {submit_dir}/condor.log
+getenv = True
+
+arguments = {arguments}
+
+should_transfer_files = YES
+transfer_input_files = {transfer_input_files}
+
+when_to_transfer_output = ON_EXIT
+output = {submit_dir}/job_$(Process).log
+error = {submit_dir}/job_$(Process).err
+queue
+"""
+
+_SUBMIT_CMD_TEMPLATE = "condor_submit -batch-name {batch_name} {jds_path}"
+
+def stringize(value, delimiter=" "):
+    if isinstance(value, collections.Iterable):
+        string = "".join([str(each) + delimiter for each in value])
+        string = string.strip(delimiter)
+    else:
+        string = str(value)
+    return string
+
+
+def submit_job(executable, batch_name, arguments, dependencies):
+    ###################################
+    # Make a job submission directory.
+    ##################################
+    submit_dir_name = "job_{name}_{date}".format(
+        name=batch_name,
+        date=datetime.now().strftime("%y%m%d-%H%M%S"))
+
+    submit_dir = os.path.join(os.path.curdir, submit_dir_name)
+
+    if os.path.exists(submit_dir):
+        raise IOError("{} already exsits".format(submit_dir))
+    else:
+        os.mkdir(submit_dir)
+
+
+    ########################################
+    #
+    #########################################
+    # for d in dependencies:
+    #     os.chmod(d, 0o777)
+         
+    ###################################
+    # Write a jds file.
+    ###################################
+    arguments = stringize(arguments, delimiter=" ")
+
+    transfer_input_files = [executable] + dependencies
+    transfer_input_files = [os.path.join(os.path.curdir, each) for each in transfer_input_files]
+    transfer_input_files = stringize(transfer_input_files, delimiter=",")
+
+    submit = _SUBMIT_TEMPLATE.format(
+        executable=executable,
+        arguments=arguments,
+        transfer_input_files=transfer_input_files,
+        submit_dir=submit_dir)
+
+    jds_path = os.path.join(submit_dir, "run.jds")
+    with open(jds_path, 'w') as jds_file:
+        jds_file.write(submit)
+
+
+    ######################################3
+    # Execute condor_submit
+    ####################################
+    submit_cmd = _SUBMIT_CMD_TEMPLATE.format(
+        batch_name=batch_name,
+        jds_path=jds_path)
+
+    print(submit_cmd)
+    os.system(submit_cmd)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-e", "--executable", required=True, type=str)
+    parser.add_argument("-b", "--batch_name", type=str)
+    parser.add_argument("-n", "--num_jobs", default=1, type=int)
+    parser.add_argument("-a", "--arguments", nargs="+", default=[])
+    parser.add_argument("-d", "--dependencies", nargs="+", default=[])
+    args = parser.parse_args()
+
+    if args.batch_name is None:
+        name = os.path.basename(args.executable)
+        name = os.path.splitext(name)[0]
+        args.batch_name = name.upper()
+
+    if args.num_jobs == 1:
+        submit_job(args.executable, args.batch_name, args.arguments, args.dependencies)
+    else:
+        for n in range(args.num_jobs):
+            name = "{}_{:6d}".format(args.batch_name, n)
+            submit_job(args.executable, name, args.arguments, args.dependencies)
