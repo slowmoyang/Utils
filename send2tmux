@@ -1,0 +1,6 @@
+#!/bin/sh
+NAME=$1 # session name
+shift
+CMD=$@
+tmux new -s ${NAME} -d
+tmux send-keys -t ${NAME} "${CMD}" C-m
