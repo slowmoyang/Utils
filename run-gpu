@@ -1,0 +1,7 @@
+#!/bin/sh
+DEVICES=$1
+shift
+
+export CUDA_VISIBLE_DEVICES=$DEVICES
+$@
+unset CUDA_VISIBLE_DEVICES
