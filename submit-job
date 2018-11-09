@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 import os
-import stat
 import sys
 import argparse
 from datetime import datetime
-import collections
+from collections import Iterable
+from socket import gethostname
 
 _SUBMIT_TEMPLATE = """ #
 executable = {executable}
 universe = vanilla
-log = {submit_dir}/condor.log
+log = {job_dir}/condor.log
 getenv = True
 
 arguments = {arguments}
@@ -18,15 +18,35 @@ should_transfer_files = YES
 transfer_input_files = {transfer_input_files}
 
 when_to_transfer_output = ON_EXIT
-output = {submit_dir}/job_$(Process).log
-error = {submit_dir}/job_$(Process).err
+output = {job_dir}/job_$(Process).log
+error = {job_dir}/job_$(Process).err
 queue
 """
 
 _SUBMIT_CMD_TEMPLATE = "condor_submit -batch-name {batch_name} {jds_path}"
 
+# the specifier for the path argument
+_PATH_SPECIFIER = "<P>"
+
+
+def get_abspath(path):
+    if path.startswith("~"):
+        path = os.path.expanduser(path)
+    return os.path.abspath(path)
+
+def process_path_arg(path):
+    path = path.lstrip(_PATH_SPECIFIER)
+    print(path)
+    hostname = gethostname()
+    path = get_abspath(path)
+    if hostname == "ui10.sdfarm.kr":
+        if path.startswith("/xrootd"):
+            path = path.replace("/xrootd", "root://cms-xrdr.sdfarm.kr:1094///xrd")
+
+    return path
+
 def stringize(value, delimiter=" "):
-    if isinstance(value, collections.Iterable):
+    if isinstance(value, Iterable):
         string = "".join([str(each) + delimiter for each in value])
         string = string.strip(delimiter)
     else:
@@ -34,37 +54,42 @@ def stringize(value, delimiter=" "):
     return string
 
 
-def submit_job(executable, batch_name, arguments, dependencies):
+def submit_job(executable, batch_name, arguments, dependencies, job_dir):
     ###################################
     # Make a job submission directory.
     ##################################
-    submit_dir_name = "job_{name}_{date}".format(
-        name=batch_name,
-        date=datetime.now().strftime("%y%m%d-%H%M%S"))
-
-    submit_dir = os.path.join(os.path.curdir, submit_dir_name)
-
-    if os.path.exists(submit_dir):
-        raise IOError("{} already exsits".format(submit_dir))
+    if job_dir is None:
+        job_dir_name = "job_{name}_{date}".format(
+            name=batch_name,
+            date=datetime.now().strftime("%y%m%d-%H%M%S"))
+        job_dir = os.path.join(os.path.curdir, job_dir_name)
     else:
-        os.mkdir(submit_dir)
+        job_dir_name = job_dir
+
+    if not os.path.exists(job_dir):
+        os.mkdir(job_dir)
 
     ###################################
     # Write a jds file.
     ###################################
+    arguments = [process_path_arg(each) if each.startswith(_PATH_SPECIFIER) else each for each in arguments]
     arguments = stringize(arguments, delimiter=" ")
 
-    transfer_input_files = [executable] + dependencies
-    transfer_input_files = [os.path.join(os.path.curdir, each) for each in transfer_input_files]
-    transfer_input_files = stringize(transfer_input_files, delimiter=",")
+    executable = get_abspath(executable)
+    # dependencies= [os.path.abspath(each) for each in dependencies]
+    
+    # transfer_input_files = [executable] + dependencies
+    # transfer_input_files = [os.path.abspath(each) for each in transfer_input_files]
+    # transfer_input_files = stringize(transfer_input_files, delimiter=",")
 
     submit = _SUBMIT_TEMPLATE.format(
         executable=executable,
         arguments=arguments,
-        transfer_input_files=transfer_input_files,
-        submit_dir=submit_dir)
+        # transfer_input_files=transfer_input_files,
+        transfer_input_files="",
+        job_dir=job_dir)
 
-    jds_path = os.path.join(submit_dir, "run.jds")
+    jds_path = os.path.join(job_dir, "run.jds")
     with open(jds_path, 'w') as jds_file:
         jds_file.write(submit)
 
@@ -84,9 +109,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--executable", required=True, type=str)
     parser.add_argument("-b", "--batch_name", type=str)
-    parser.add_argument("-n", "--num_jobs", default=1, type=int)
     parser.add_argument("-a", "--arguments", nargs="+", default=[])
     parser.add_argument("-d", "--dependencies", nargs="+", default=[])
+    parser.add_argument("-j", "--job_dir", type=str, default=None)
     args = parser.parse_args()
 
     if args.batch_name is None:
@@ -94,9 +119,8 @@ if __name__ == "__main__":
         name = os.path.splitext(name)[0]
         args.batch_name = name.upper()
 
-    if args.num_jobs == 1:
-        submit_job(args.executable, args.batch_name, args.arguments, args.dependencies)
-    else:
-        for n in range(args.num_jobs):
-            name = "{}_{:6d}".format(args.batch_name, n)
-            submit_job(args.executable, name, args.arguments, args.dependencies)
+    submit_job(args.executable,
+               args.batch_name,
+               args.arguments,
+               args.dependencies,
+               args.job_dir)
