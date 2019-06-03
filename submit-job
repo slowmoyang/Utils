@@ -6,7 +6,9 @@ from datetime import datetime
 from collections import Iterable
 from socket import gethostname
 
-_SUBMIT_TEMPLATE = """ #
+
+def generate_jds_format():
+    jds_format = """ #
 executable = {executable}
 universe = vanilla
 log = {job_dir}/condor.log
@@ -20,8 +22,22 @@ transfer_input_files = {transfer_input_files}
 when_to_transfer_output = ON_EXIT
 output = {job_dir}/job_{job_specifier}_$(Process).log
 error = {job_dir}/job_{job_specifier}_$(Process).err
-queue
 """
+
+    if gethostname() in ['ui10.sdfarm.kr', 'ui20.sdfarm.kr']:
+        jds_format += '''
+accounting_group=group_cms
+'''
+
+# '''
+# requirements = ( HasSingularity == true )  
+# +SingularityImage = "/cvmfs/singularity.opensciencegrid.org/opensciencegrid/osgvo-el6:latest"
+# +SingularityBind = "/cvmfs, /cms, /share"
+# '''
+
+    jds_format += "queue"
+    return jds_format
+
 
 _SUBMIT_CMD_TEMPLATE = "condor_submit -batch-name {batch_name} {jds_path}"
 
@@ -39,9 +55,8 @@ def process_path_arg(path):
     print(path)
     hostname = gethostname()
     path = get_abspath(path)
-    if hostname == "ui10.sdfarm.kr":
-        if path.startswith("/xrootd"):
-            path = path.replace("/xrootd", "root://cms-xrdr.sdfarm.kr:1094///xrd")
+    if hostname == "ui10.sdfarm.kr" and path.startswith("/xrootd"):
+        path = path.replace("/xrootd", "root://cms-xrdr.sdfarm.kr:1094///xrd")
 
     return path
 
@@ -54,7 +69,7 @@ def stringize(value, delimiter=" "):
     return string
 
 
-def submit_job(executable, batch_name, arguments, dependencies, job_dir, job_specifier):
+def submit_job(executable, batch_name, arguments, job_dir, job_specifier):
     ###################################
     # Make a job submission directory.
     ##################################
@@ -76,13 +91,9 @@ def submit_job(executable, batch_name, arguments, dependencies, job_dir, job_spe
     arguments = stringize(arguments, delimiter=" ")
 
     executable = get_abspath(executable)
-    # dependencies= [os.path.abspath(each) for each in dependencies]
     
-    # transfer_input_files = [executable] + dependencies
-    # transfer_input_files = [os.path.abspath(each) for each in transfer_input_files]
-    # transfer_input_files = stringize(transfer_input_files, delimiter=",")
-
-    submit = _SUBMIT_TEMPLATE.format(
+    jds_fmt = generate_jds_format()
+    submit = jds_fmt.format(
         executable=executable,
         arguments=arguments,
         # transfer_input_files=transfer_input_files,
@@ -112,7 +123,6 @@ if __name__ == "__main__":
     parser.add_argument("-b", "--batch_name", type=str)
     parser.add_argument("-s", "--job-specifier", dest="job_specifier", default="", type=str)
     parser.add_argument("-a", "--arguments", nargs="+", default=[])
-    parser.add_argument("-d", "--dependencies", nargs="+", default=[])
     parser.add_argument("-j", "--job_dir", type=str, default=None)
     args = parser.parse_args()
 
@@ -124,6 +134,5 @@ if __name__ == "__main__":
     submit_job(args.executable,
                args.batch_name,
                args.arguments,
-               args.dependencies,
                args.job_dir,
                args.job_specifier)
